@@ -54,7 +54,9 @@ func main() {
 func runClientDaemon(args []string) error {
 	fs := flag.NewFlagSet("client-daemon", flag.ExitOnError)
 	port := fs.Int("port", 4444, "port to listen on")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("parse flags: %w", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -86,7 +88,9 @@ func runServerDaemon(args []string) error {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
-		os.Chmod(dir, 0700)
+		if err := os.Chmod(dir, 0700); err != nil {
+			return fmt.Errorf("chmod %s: %w", dir, err)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

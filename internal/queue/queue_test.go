@@ -66,8 +66,12 @@ func TestSessionIsolation(t *testing.T) {
 
 	msgA := &protocol.Message{Type: "exec", SessionID: "a", Command: "open", Args: []string{"a"}}
 	msgB := &protocol.Message{Type: "exec", SessionID: "b", Command: "open", Args: []string{"b"}}
-	q.Enqueue("a", msgA)
-	q.Enqueue("b", msgB)
+	if err := q.Enqueue("a", msgA); err != nil {
+		t.Fatalf("Enqueue a: %v", err)
+	}
+	if err := q.Enqueue("b", msgB); err != nil {
+		t.Fatalf("Enqueue b: %v", err)
+	}
 
 	msgsA, _ := q.Drain("a")
 	if len(msgsA) != 1 || msgsA[0].Args[0] != "a" {
@@ -82,8 +86,12 @@ func TestSessionIsolation(t *testing.T) {
 func TestDrainCleansUp(t *testing.T) {
 	q := tempQueue(t)
 	msg := &protocol.Message{Type: "exec", SessionID: "s", Command: "open"}
-	q.Enqueue("s", msg)
-	q.Drain("s")
+	if err := q.Enqueue("s", msg); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if _, err := q.Drain("s"); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
 
 	count, _ := q.Pending("s")
 	if count != 0 {
@@ -95,7 +103,9 @@ func TestPending(t *testing.T) {
 	q := tempQueue(t)
 	for i := 0; i < 5; i++ {
 		msg := &protocol.Message{Type: "exec", SessionID: "s", Command: "open"}
-		q.Enqueue("s", msg)
+		if err := q.Enqueue("s", msg); err != nil {
+			t.Fatalf("Enqueue %d: %v", i, err)
+		}
 	}
 	count, err := q.Pending("s")
 	if err != nil {
@@ -114,7 +124,7 @@ func TestConcurrentEnqueue(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			msg := &protocol.Message{Type: "exec", SessionID: "s", Command: "open", Args: []string{string(rune('a' + i))}}
-			q.Enqueue("s", msg)
+			_ = q.Enqueue("s", msg)
 		}(i)
 	}
 	wg.Wait()

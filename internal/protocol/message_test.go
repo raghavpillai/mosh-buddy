@@ -90,7 +90,7 @@ func TestCanonicalPayloadDifferentArgs(t *testing.T) {
 
 func TestMaxSize(t *testing.T) {
 	var buf bytes.Buffer
-	binary.Write(&buf, binary.BigEndian, uint32(MaxMessageSize+1))
+	_ = binary.Write(&buf, binary.BigEndian, uint32(MaxMessageSize+1))
 	buf.Write(make([]byte, 100)) // doesn't matter, should reject before reading
 
 	_, err := Decode(&buf)
@@ -110,7 +110,7 @@ func TestTruncatedLength(t *testing.T) {
 func TestInvalidJSON(t *testing.T) {
 	payload := []byte("not json at all{{{")
 	var buf bytes.Buffer
-	binary.Write(&buf, binary.BigEndian, uint32(len(payload)))
+	_ = binary.Write(&buf, binary.BigEndian, uint32(len(payload))) //nolint:gosec // test data, len is small
 	buf.Write(payload)
 
 	_, err := Decode(&buf)
@@ -124,8 +124,12 @@ func TestNilVsEmptyArgs(t *testing.T) {
 	msg2 := &Message{Type: "exec", SessionID: "s", Command: "open", Args: []string{}, Timestamp: 1}
 
 	var buf1, buf2 bytes.Buffer
-	Encode(&buf1, msg1)
-	Encode(&buf2, msg2)
+	if err := Encode(&buf1, msg1); err != nil {
+		t.Fatalf("Encode msg1: %v", err)
+	}
+	if err := Encode(&buf2, msg2); err != nil {
+		t.Fatalf("Encode msg2: %v", err)
+	}
 
 	got1, _ := Decode(&buf1)
 	got2, _ := Decode(&buf2)

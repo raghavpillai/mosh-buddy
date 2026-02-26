@@ -44,7 +44,7 @@ func Encode(w io.Writer, msg *Message) error {
 	if len(data) > MaxMessageSize {
 		return fmt.Errorf("message too large: %d > %d", len(data), MaxMessageSize)
 	}
-	length := uint32(len(data))
+	length := uint32(len(data)) //nolint:gosec // len(data) <= MaxMessageSize (1MB), well within uint32 range
 	if err := binary.Write(w, binary.BigEndian, length); err != nil {
 		return fmt.Errorf("write length: %w", err)
 	}

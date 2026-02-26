@@ -68,7 +68,9 @@ func Connect(args []string) error {
 		return fmt.Errorf("cannot determine home directory: %w", err)
 	}
 	keyDir := filepath.Join(homeDir, ".mb", "sessions", sessionID)
-	os.MkdirAll(keyDir, 0700)
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		return fmt.Errorf("create key dir: %w", err)
+	}
 	if err := os.WriteFile(filepath.Join(keyDir, "key"), []byte(hexKey), 0600); err != nil {
 		return fmt.Errorf("store key: %w", err)
 	}
@@ -145,7 +147,7 @@ func tunnelMonitor(ctx context.Context, target string, tunnelPort, clientPort in
 		registerCmd := fmt.Sprintf("mb _register --session=%s --port=%d", sessionID, tunnelPort)
 		reReg := exec.Command("ssh", target, registerCmd)
 		reReg.Stdin = strings.NewReader(hexKey + "\n")
-		reReg.Run() // best-effort
+		_ = reReg.Run() // best-effort
 	}
 }
 
@@ -202,7 +204,7 @@ func cleanup(target, sessionID, homeDir string) {
 
 	// Deregister on server (best-effort) — uses proper deregister to clean both disk and in-memory state
 	cmd := exec.Command("ssh", target, fmt.Sprintf("mb _deregister --session=%s", sessionID))
-	cmd.Run()
+	_ = cmd.Run()
 }
 
 func generateUUID() (string, error) {

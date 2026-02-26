@@ -62,15 +62,21 @@ func (d *ServerDaemon) Run(ctx context.Context) error {
 
 	// Ensure parent directory exists with correct permissions
 	socketDir := filepath.Dir(d.socketPath)
-	os.MkdirAll(socketDir, 0700)
-	os.Chmod(socketDir, 0700) // enforce even if umask weakened MkdirAll
+	if err := os.MkdirAll(socketDir, 0700); err != nil {
+		return fmt.Errorf("create socket dir: %w", err)
+	}
+	if err := os.Chmod(socketDir, 0700); err != nil {
+		return fmt.Errorf("chmod socket dir: %w", err)
+	}
 
 	var err error
 	d.listener, err = net.Listen("unix", d.socketPath)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", d.socketPath, err)
 	}
-	os.Chmod(d.socketPath, 0600)
+	if err := os.Chmod(d.socketPath, 0600); err != nil {
+		return fmt.Errorf("chmod socket: %w", err)
+	}
 
 	// Recover sessions from disk
 	d.recoverSessions()
@@ -103,12 +109,12 @@ func (d *ServerDaemon) Run(ctx context.Context) error {
 
 func (d *ServerDaemon) handleConn(conn net.Conn) {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	msg, err := protocol.Decode(conn)
 	if err != nil {
 		log.Printf("decode error: %v", err)
-		protocol.Encode(conn, &protocol.Message{Type: "error", Error: fmt.Sprintf("decode: %v", err)})
+		_ = protocol.Encode(conn, &protocol.Message{Type: "error", Error: fmt.Sprintf("decode: %v", err)})
 		return
 	}
 
@@ -120,7 +126,7 @@ func (d *ServerDaemon) handleConn(conn net.Conn) {
 	case "exec":
 		d.handleExec(conn, msg)
 	default:
-		protocol.Encode(conn, &protocol.Message{
+		_ = protocol.Encode(conn, &protocol.Message{
 			Type:      "error",
 			SessionID: msg.SessionID,
 			Error:     fmt.Sprintf("unknown message type: %s", msg.Type),
@@ -131,14 +137,14 @@ func (d *ServerDaemon) handleConn(conn net.Conn) {
 func (d *ServerDaemon) handleRegister(conn net.Conn, msg *protocol.Message) {
 	if err := protocol.ValidateSessionID(msg.SessionID); err != nil {
 		log.Printf("register: %v", err)
-		protocol.Encode(conn, &protocol.Message{Type: "error", Error: err.Error()})
+		_ = protocol.Encode(conn, &protocol.Message{Type: "error", Error: err.Error()})
 		return
 	}
 
 	key, err := security.KeyFromHex(msg.Key)
 	if err != nil {
 		log.Printf("register: bad key: %v", err)
-		protocol.Encode(conn, &protocol.Message{
+		_ = protocol.Encode(conn, &protocol.Message{
 			Type:  "error",
 			Error: fmt.Sprintf("bad key: %v", err),
 		})
@@ -154,12 +160,20 @@ func (d *ServerDaemon) handleRegister(conn net.Conn, msg *protocol.Message) {
 
 	// Store key to disk
 	keyDir := filepath.Join(d.mbDir, "sessions", msg.SessionID)
-	os.MkdirAll(keyDir, 0700)
-	os.WriteFile(filepath.Join(keyDir, "key"), []byte(msg.Key), 0600)
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		log.Printf("register: mkdir error: %v", err)
+		_ = protocol.Encode(conn, &protocol.Message{Type: "error", Error: fmt.Sprintf("mkdir: %v", err)})
+		return
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "key"), []byte(msg.Key), 0600); err != nil {
+		log.Printf("register: write key error: %v", err)
+		_ = protocol.Encode(conn, &protocol.Message{Type: "error", Error: fmt.Sprintf("write key: %v", err)})
+		return
+	}
 
 	log.Printf("registered session %s → port %d", msg.SessionID, msg.Port)
 
-	protocol.Encode(conn, &protocol.Message{
+	_ = protocol.Encode(conn, &protocol.Message{
 		Type:      "ack",
 		SessionID: msg.SessionID,
 	})
@@ -176,7 +190,7 @@ func (d *ServerDaemon) handleDeregister(conn net.Conn, msg *protocol.Message) {
 
 	log.Printf("deregistered session %s", msg.SessionID)
 
-	protocol.Encode(conn, &protocol.Message{
+	_ = protocol.Encode(conn, &protocol.Message{
 		Type:      "ack",
 		SessionID: msg.SessionID,
 	})
@@ -184,7 +198,7 @@ func (d *ServerDaemon) handleDeregister(conn net.Conn, msg *protocol.Message) {
 
 func (d *ServerDaemon) handleExec(conn net.Conn, msg *protocol.Message) {
 	if err := protocol.ValidateSessionID(msg.SessionID); err != nil {
-		protocol.Encode(conn, &protocol.Message{Type: "error", Error: err.Error()})
+		_ = protocol.Encode(conn, &protocol.Message{Type: "error", Error: err.Error()})
 		return
 	}
 
@@ -194,7 +208,7 @@ func (d *ServerDaemon) handleExec(conn net.Conn, msg *protocol.Message) {
 
 	if !ok {
 		log.Printf("exec: unknown session %s", msg.SessionID)
-		protocol.Encode(conn, &protocol.Message{
+		_ = protocol.Encode(conn, &protocol.Message{
 			Type:      "error",
 			SessionID: msg.SessionID,
 			Error:     "unknown session",
@@ -206,8 +220,10 @@ func (d *ServerDaemon) handleExec(conn net.Conn, msg *protocol.Message) {
 		log.Printf("session %s: port unknown (awaiting re-register), queuing", msg.SessionID)
 		msg.Timestamp = time.Now().Unix()
 		msg.HMAC = security.Sign(session.Key, msg)
-		d.queue.Enqueue(msg.SessionID, msg)
-		protocol.Encode(conn, &protocol.Message{
+		if err := d.queue.Enqueue(msg.SessionID, msg); err != nil {
+			log.Printf("session %s: queue error: %v", msg.SessionID, err)
+		}
+		_ = protocol.Encode(conn, &protocol.Message{
 			Type:      "ack",
 			SessionID: msg.SessionID,
 		})
@@ -225,14 +241,14 @@ func (d *ServerDaemon) handleExec(conn net.Conn, msg *protocol.Message) {
 		log.Printf("session %s: tunnel unreachable (%v), queuing", msg.SessionID, err)
 		if qErr := d.queue.Enqueue(msg.SessionID, msg); qErr != nil {
 			log.Printf("session %s: queue error: %v", msg.SessionID, qErr)
-			protocol.Encode(conn, &protocol.Message{
+			_ = protocol.Encode(conn, &protocol.Message{
 				Type:      "error",
 				SessionID: msg.SessionID,
 				Error:     fmt.Sprintf("tunnel down and queue failed: %v", qErr),
 			})
 			return
 		}
-		protocol.Encode(conn, &protocol.Message{
+		_ = protocol.Encode(conn, &protocol.Message{
 			Type:      "ack",
 			SessionID: msg.SessionID,
 		})
@@ -240,7 +256,7 @@ func (d *ServerDaemon) handleExec(conn net.Conn, msg *protocol.Message) {
 	}
 
 	// Forward the client's response back to the caller
-	protocol.Encode(conn, resp)
+	_ = protocol.Encode(conn, resp)
 }
 
 func (d *ServerDaemon) forwardToTunnel(port int, msg *protocol.Message) (*protocol.Message, error) {
@@ -250,7 +266,7 @@ func (d *ServerDaemon) forwardToTunnel(port int, msg *protocol.Message) (*protoc
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 	if err := protocol.Encode(conn, msg); err != nil {
 		return nil, fmt.Errorf("encode: %w", err)
@@ -313,7 +329,9 @@ func (d *ServerDaemon) drainAll() {
 				log.Printf("drain forward error for session %s: %v", sessionID, err)
 				// Re-queue this message and all remaining
 				for j := i; j < len(msgs); j++ {
-					d.queue.Enqueue(sessionID, msgs[j])
+					if err := d.queue.Enqueue(sessionID, msgs[j]); err != nil {
+						log.Printf("session %s: re-queue error: %v", sessionID, err)
+					}
 				}
 				break
 			}
@@ -358,6 +376,6 @@ func (d *ServerDaemon) RegisterSession(sessionID string, port int, key []byte) {
 	d.mu.Unlock()
 
 	keyDir := filepath.Join(d.mbDir, "sessions", sessionID)
-	os.MkdirAll(keyDir, 0700)
-	os.WriteFile(filepath.Join(keyDir, "key"), []byte(security.KeyToHex(key)), 0600)
+	_ = os.MkdirAll(keyDir, 0700)
+	_ = os.WriteFile(filepath.Join(keyDir, "key"), []byte(security.KeyToHex(key)), 0600)
 }

@@ -24,8 +24,12 @@ func TestIntegrationBasicFlow(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	mbDir := filepath.Join(tmpDir, ".mb")
-	os.MkdirAll(filepath.Join(mbDir, "sessions"), 0700)
-	os.MkdirAll(filepath.Join(mbDir, "queue"), 0700)
+	if err := os.MkdirAll(filepath.Join(mbDir, "sessions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(mbDir, "queue"), 0700); err != nil {
+		t.Fatal(err)
+	}
 
 	// Find free ports
 	clientPort := findFreePort(t, 14444, 14544)
@@ -38,12 +42,18 @@ func TestIntegrationBasicFlow(t *testing.T) {
 
 	// Write config that allows "echo"
 	configData := `{"allow": ["echo", "true", "open", "xdg-open", "pbcopy", "notify-send"], "deny": ["rm", "sudo"], "prompt_unknown": false}`
-	os.WriteFile(filepath.Join(mbDir, "config.json"), []byte(configData), 0600)
+	if err := os.WriteFile(filepath.Join(mbDir, "config.json"), []byte(configData), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	// Store session key in client's session dir
 	keyDir := filepath.Join(mbDir, "sessions", sessionID)
-	os.MkdirAll(keyDir, 0700)
-	os.WriteFile(filepath.Join(keyDir, "key"), []byte(hexKey), 0600)
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "key"), []byte(hexKey), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	// Override HOME so daemons find our test directory
 	origHome := os.Getenv("HOME")
@@ -55,14 +65,14 @@ func TestIntegrationBasicFlow(t *testing.T) {
 	defer cancel()
 
 	clientDaemon := client.NewClientDaemon(clientPort)
-	go clientDaemon.Run(ctx)
+	go func() { _ = clientDaemon.Run(ctx) }()
 
 	// Wait for client to be ready
 	waitForPort(t, clientPort, 3*time.Second)
 
 	// Start server daemon
 	serverDaemon := server.NewServerDaemonWithDir(socketPath, mbDir)
-	go serverDaemon.Run(ctx)
+	go func() { _ = serverDaemon.Run(ctx) }()
 
 	// Wait for server to be ready
 	waitForSocket(t, socketPath, 3*time.Second)
@@ -105,8 +115,12 @@ func TestIntegrationQueueDrain(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	mbDir := filepath.Join(tmpDir, ".mb")
-	os.MkdirAll(filepath.Join(mbDir, "sessions"), 0700)
-	os.MkdirAll(filepath.Join(mbDir, "queue"), 0700)
+	if err := os.MkdirAll(filepath.Join(mbDir, "sessions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(mbDir, "queue"), 0700); err != nil {
+		t.Fatal(err)
+	}
 
 	socketPath := filepath.Join(tmpDir, "mb.sock")
 	sessionID := "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"
@@ -118,32 +132,46 @@ func TestIntegrationQueueDrain(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	keyDir := filepath.Join(mbDir, "sessions", sessionID)
-	os.MkdirAll(keyDir, 0700)
-	os.WriteFile(filepath.Join(keyDir, "key"), []byte(hexKey), 0600)
+	if err := os.MkdirAll(keyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "key"), []byte(hexKey), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	configData := `{"allow": ["true", "echo"], "deny": [], "prompt_unknown": false}`
-	os.WriteFile(filepath.Join(mbDir, "config.json"), []byte(configData), 0600)
+	if err := os.WriteFile(filepath.Join(mbDir, "config.json"), []byte(configData), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Start server daemon but register session on a port nothing is listening on
 	serverDaemon := server.NewServerDaemonWithDir(socketPath, mbDir)
-	go serverDaemon.Run(ctx)
+	go func() { _ = serverDaemon.Run(ctx) }()
 	waitForSocket(t, socketPath, 3*time.Second)
 
 	deadPort := 19999
 	serverDaemon.RegisterSession(sessionID, deadPort, key)
 
 	// Send a command — should be queued since tunnel is down
-	conn, _ := net.Dial("unix", socketPath)
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial server: %v", err)
+	}
 	msg := &protocol.Message{
 		Type:      "exec",
 		SessionID: sessionID,
 		Command:   "true",
 	}
-	protocol.Encode(conn, msg)
-	resp, _ := protocol.Decode(conn)
+	if err := protocol.Encode(conn, msg); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	resp, err := protocol.Decode(conn)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	conn.Close()
 
 	if resp.Type != "ack" {
@@ -153,7 +181,7 @@ func TestIntegrationQueueDrain(t *testing.T) {
 	// Now start client daemon on a port and update session to point there
 	clientPort := findFreePort(t, 15000, 15100)
 	clientDaemon := client.NewClientDaemon(clientPort)
-	go clientDaemon.Run(ctx)
+	go func() { _ = clientDaemon.Run(ctx) }()
 	waitForPort(t, clientPort, 3*time.Second)
 
 	// Update session to point at the real client

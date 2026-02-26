@@ -92,7 +92,7 @@ func (d *ClientDaemon) Run(ctx context.Context) error {
 
 func (d *ClientDaemon) handleConn(conn net.Conn) {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(30 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	msg, err := protocol.Decode(conn)
 	if err != nil {
@@ -156,7 +156,7 @@ func (d *ClientDaemon) handleConn(conn net.Conn) {
 	}
 
 	log.Printf("session %s: command succeeded", msg.SessionID)
-	protocol.Encode(conn, &protocol.Message{
+	_ = protocol.Encode(conn, &protocol.Message{
 		Type:      "ack",
 		SessionID: msg.SessionID,
 		Output:    output,
@@ -188,15 +188,8 @@ func (d *ClientDaemon) checkCommand(cmd string) string {
 	return "deny"
 }
 
-func sendAck(conn net.Conn, sessionID string) {
-	protocol.Encode(conn, &protocol.Message{
-		Type:      "ack",
-		SessionID: sessionID,
-	})
-}
-
 func sendError(conn net.Conn, sessionID string, errMsg string) {
-	protocol.Encode(conn, &protocol.Message{
+	_ = protocol.Encode(conn, &protocol.Message{
 		Type:      "error",
 		SessionID: sessionID,
 		Error:     errMsg,
