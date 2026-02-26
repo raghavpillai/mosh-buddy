@@ -70,6 +70,30 @@ echo "some text" | mb pbcopy
 mb notify-send "deploy finished"
 ```
 
+### Placeholders
+
+Commands can use `{MB_*}` placeholders that get expanded before execution. This is how you open remote directories in local editors.
+
+| Placeholder | Value |
+|---|---|
+| `{MB_HOST}` | Remote hostname (from `mb connect` target) |
+| `{MB_USER}` | Remote username (from `mb connect` target) |
+| `{MB_CWD}` | Current working directory on remote |
+| `{MB_SESSION}` | Session UUID |
+
+```sh
+# open current remote directory in local Zed
+mb zed ssh://{MB_USER}@{MB_HOST}{MB_CWD}
+
+# open in local VS Code
+mb code --remote ssh-remote+{MB_HOST} {MB_CWD}
+
+# open in local Cursor
+mb cursor --remote ssh-remote+{MB_HOST} {MB_CWD}
+```
+
+Any `{...}` placeholder that doesn't start with `MB_` is rejected with an error. Empty placeholders tell you you're not in a session.
+
 ### Check status
 
 ```sh
