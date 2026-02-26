@@ -23,7 +23,7 @@ jobs:
           for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             os="${pair%/*}"
             arch="${pair#*/}"
-            GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w" -o "mb-${os}-${arch}" ./cmd/mb
+            GOOS="$os" GOARCH="$arch" go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "mb-${os}-${arch}" ./cmd/mb
           done
 
       - name: Create release

@@ -17,7 +17,10 @@ import (
 	"github.com/raghav/mosh-buddy/internal/client"
 	"github.com/raghav/mosh-buddy/internal/protocol"
 	"github.com/raghav/mosh-buddy/internal/server"
+	"github.com/raghav/mosh-buddy/internal/updater"
 )
+
+var version = "dev"
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -27,10 +30,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resolve mbDir once for update checks
+	mbDir := ""
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		mbDir = filepath.Join(homeDir, ".mb")
+	}
+
 	var err error
 	switch os.Args[1] {
 	case "connect":
+		done := updater.CheckInBackground(version, mbDir)
 		err = client.Connect(os.Args[2:])
+		updater.PrintUpdateNotice(version, mbDir, done)
 	case "client-daemon":
 		err = runClientDaemon(os.Args[2:])
 	case "server-daemon":
@@ -40,7 +51,13 @@ func main() {
 	case "_deregister":
 		err = server.Deregister(os.Args[2:])
 	case "status":
+		done := updater.CheckInBackground(version, mbDir)
 		err = handleStatus()
+		updater.PrintUpdateNotice(version, mbDir, done)
+	case "update":
+		err = updater.Update(version)
+	case "version", "--version", "-v":
+		fmt.Printf("mb %s\n", version)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -248,13 +265,15 @@ func expandPlaceholders(s string) (string, error) {
 }
 
 func printUsage() {
-	fmt.Println(`mosh-buddy (mb) — side-channel for mosh sessions
+	fmt.Printf(`mosh-buddy (mb) %s — side-channel for mosh sessions
 
 Usage:
   mb connect user@host       Start a mosh session with side-channel
   mb client-daemon [--port]  Start the client daemon (usually auto-started)
   mb server-daemon           Start the server daemon
   mb status                  Show daemon and session status
+  mb update                  Update mb to the latest version
+  mb version                 Show version
   mb <command> [args...]     Execute command on local machine (from remote)
 
 Placeholders (expanded from environment):
@@ -268,5 +287,6 @@ Examples (on remote, inside mb connect session):
   echo "text" | mb pbcopy                          Copy to local clipboard
   mb notify-send "build finished"                  Local desktop notification
   mb zed ssh://{MB_USER}@{MB_HOST}{MB_CWD}          Open remote dir in local Zed
-  mb code --remote ssh-remote+{MB_HOST} {MB_CWD}   Open remote dir in local VS Code`)
+  mb code --remote ssh-remote+{MB_HOST} {MB_CWD}   Open remote dir in local VS Code
+`, version)
 }
