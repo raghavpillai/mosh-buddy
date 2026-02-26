@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"syscall"
 
 	"github.com/raghav/mosh-buddy/internal/client"
@@ -136,6 +138,18 @@ func remoteExec(command string, args []string) error {
 	}
 	defer conn.Close()
 
+	// Expand {MB_*} placeholders in command and args
+	command, err = expandPlaceholders(command)
+	if err != nil {
+		return err
+	}
+	for i, arg := range args {
+		args[i], err = expandPlaceholders(arg)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Build and send exec message (unsigned — server daemon will sign it)
 	msg := &protocol.Message{
 		Type:      "exec",
@@ -204,6 +218,31 @@ func handleStatus() error {
 	return nil
 }
 
+var placeholderRe = regexp.MustCompile(`\{[^}]+\}`)
+
+// expandPlaceholders replaces {MB_*} placeholders with their environment values.
+// Any {…} placeholder that doesn't start with MB_ is an error.
+func expandPlaceholders(s string) (string, error) {
+	var expandErr error
+	result := placeholderRe.ReplaceAllStringFunc(s, func(match string) string {
+		name := match[1 : len(match)-1] // strip { }
+		if !strings.HasPrefix(name, "MB_") {
+			expandErr = fmt.Errorf("unknown placeholder %s (only {MB_*} placeholders are supported)", match)
+			return match
+		}
+		val := os.Getenv(name)
+		if val == "" {
+			expandErr = fmt.Errorf("placeholder %s is empty (are you inside an mb connect session?)", match)
+			return match
+		}
+		return val
+	})
+	if expandErr != nil {
+		return "", expandErr
+	}
+	return result, nil
+}
+
 func printUsage() {
 	fmt.Println(`mosh-buddy (mb) — side-channel for mosh sessions
 
@@ -214,8 +253,15 @@ Usage:
   mb status                  Show daemon and session status
   mb <command> [args...]     Execute command on local machine (from remote)
 
+Placeholders (expanded from environment):
+  {MB_HOST}    Remote hostname (from mb connect target)
+  {MB_USER}    Remote username (from mb connect target)
+  {MB_SESSION} Session UUID
+
 Examples (on remote, inside mb connect session):
-  mb open https://example.com       Open URL in local browser
-  echo "text" | mb pbcopy           Copy to local clipboard
-  mb notify "build finished"        Local desktop notification`)
+  mb open https://example.com                      Open URL in local browser
+  echo "text" | mb pbcopy                          Copy to local clipboard
+  mb notify-send "build finished"                  Local desktop notification
+  mb zed ssh://{MB_USER}@{MB_HOST}$PWD             Open remote dir in local Zed
+  mb code --remote ssh-remote+{MB_HOST} $PWD       Open remote dir in local VS Code`)
 }

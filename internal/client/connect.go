@@ -90,7 +90,15 @@ func Connect(args []string) error {
 	go tunnelMonitor(ctx, target, tunnelPort, clientPort, sessionID, hexKey)
 
 	// 8. Launch mosh
-	moshServer := fmt.Sprintf("env MB_SESSION=%s MB_PORT=%d mosh-server", sessionID, tunnelPort)
+	// Split target into user and host for MB_USER/MB_HOST env vars
+	mbUser := ""
+	mbHost := target
+	if i := strings.Index(target, "@"); i >= 0 {
+		mbUser = target[:i]
+		mbHost = target[i+1:]
+	}
+	moshServer := fmt.Sprintf("env MB_SESSION=%s MB_PORT=%d MB_HOST=%s MB_USER=%s mosh-server",
+		sessionID, tunnelPort, mbHost, mbUser)
 	moshCmd := exec.Command("mosh", "--server="+moshServer, target)
 	moshCmd.Stdin = os.Stdin
 	moshCmd.Stdout = os.Stdout
