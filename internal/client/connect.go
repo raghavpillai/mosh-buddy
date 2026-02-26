@@ -23,13 +23,11 @@ func Connect(args []string) error {
 	}
 	target := args[0]
 
-	// 1. Generate session ID (UUID v4)
 	sessionID, err := generateUUID()
 	if err != nil {
 		return fmt.Errorf("generate session ID: %w", err)
 	}
 
-	// 2. Generate HMAC key
 	key, err := security.GenerateKey()
 	if err != nil {
 		return fmt.Errorf("generate key: %w", err)
@@ -38,20 +36,18 @@ func Connect(args []string) error {
 
 	log.Printf("session %s created", sessionID)
 
-	// 3. Ensure client daemon is running
 	clientPort := 4444
 	if err := ensureClientDaemon(clientPort); err != nil {
 		return fmt.Errorf("ensure client daemon: %w", err)
 	}
 
-	// 4. Pick a free tunnel port
 	tunnelPort, err := findFreePort(4445, 4545)
 	if err != nil {
 		return fmt.Errorf("find free tunnel port: %w", err)
 	}
 	log.Printf("using tunnel port %d", tunnelPort)
 
-	// 5. Register session on server (key passed via stdin to avoid ps visibility)
+	// Key passed via stdin to avoid ps visibility
 	registerCmd := fmt.Sprintf("mb _register --session=%s --port=%d", sessionID, tunnelPort)
 	log.Printf("registering session on %s", target)
 	cmd := exec.Command("ssh", target, registerCmd)
@@ -62,7 +58,6 @@ func Connect(args []string) error {
 		return fmt.Errorf("register session: %w", err)
 	}
 
-	// 6. Store key locally
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("cannot determine home directory: %w", err)
@@ -75,11 +70,9 @@ func Connect(args []string) error {
 		return fmt.Errorf("store key: %w", err)
 	}
 
-	// 7. Start tunnel monitor
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -89,8 +82,6 @@ func Connect(args []string) error {
 
 	go tunnelMonitor(ctx, target, tunnelPort, clientPort, sessionID, hexKey)
 
-	// 8. Launch mosh
-	// Split target into user and host for MB_USER/MB_HOST env vars
 	mbUser := ""
 	mbHost := target
 	if i := strings.Index(target, "@"); i >= 0 {
@@ -107,7 +98,6 @@ func Connect(args []string) error {
 	log.Printf("launching mosh to %s", target)
 	moshErr := moshCmd.Run()
 
-	// 9. Cleanup
 	cancel()
 	cleanup(target, sessionID, homeDir)
 
@@ -167,7 +157,6 @@ func ensureClientDaemon(port int) error {
 		return nil
 	}
 
-	// Start client daemon
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
@@ -179,7 +168,6 @@ func ensureClientDaemon(port int) error {
 		return fmt.Errorf("start client daemon: %w", err)
 	}
 
-	// Wait for it to be ready
 	for i := 0; i < 20; i++ {
 		time.Sleep(100 * time.Millisecond)
 		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
@@ -206,11 +194,10 @@ func findFreePort(start, end int) (int, error) {
 func cleanup(target, sessionID, homeDir string) {
 	log.Printf("cleaning up session %s", sessionID)
 
-	// Remove local key
 	keyDir := filepath.Join(homeDir, ".mb", "sessions", sessionID)
 	os.RemoveAll(keyDir)
 
-	// Deregister on server (best-effort) — uses proper deregister to clean both disk and in-memory state
+	// Best-effort deregister cleans both disk and in-memory state
 	cmd := exec.Command("ssh", target, fmt.Sprintf("mb _deregister --session=%s", sessionID))
 	_ = cmd.Run()
 }

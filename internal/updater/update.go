@@ -27,16 +27,14 @@ func Update(currentVersion string) error {
 	fmt.Printf("Current version: %s\n", currentVersion)
 	fmt.Println("Checking for updates...")
 
-	// No overall timeout — the binary download can be slow on some connections.
-	// Only the TCP dial and TLS handshake are time-bounded.
+	// No overall timeout — only bound dial and TLS handshake so slow downloads aren't killed
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext: (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			DialContext:         (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
 			TLSHandshakeTimeout: 10 * time.Second,
 		},
 	}
 
-	// Fetch release info
 	resp, err := client.Get(repoAPI)
 	if err != nil {
 		return fmt.Errorf("fetch release info: %w", err)
@@ -57,7 +55,6 @@ func Update(currentVersion string) error {
 		return nil
 	}
 
-	// Find matching asset
 	wantName := fmt.Sprintf("mb-%s-%s", runtime.GOOS, runtime.GOARCH)
 	var downloadURL string
 	for _, asset := range release.Assets {
@@ -70,7 +67,6 @@ func Update(currentVersion string) error {
 		return fmt.Errorf("no release binary for %s/%s in %s", runtime.GOOS, runtime.GOARCH, release.TagName)
 	}
 
-	// Find current binary path
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
@@ -82,7 +78,7 @@ func Update(currentVersion string) error {
 
 	fmt.Printf("Downloading %s %s...\n", wantName, release.TagName)
 
-	// Download to temp file in same directory (for atomic rename)
+	// Same directory as binary so os.Rename is atomic
 	dir := filepath.Dir(exePath)
 	tmpFile, err := os.CreateTemp(dir, "mb-update-*")
 	if err != nil {
@@ -110,12 +106,10 @@ func Update(currentVersion string) error {
 	}
 	tmpFile.Close()
 
-	// Make executable
 	if err := os.Chmod(tmpPath, 0755); err != nil {
 		return fmt.Errorf("chmod: %w", err)
 	}
 
-	// Atomic replace
 	if err := os.Rename(tmpPath, exePath); err != nil {
 		return fmt.Errorf("replace binary: %w", err)
 	}
@@ -123,7 +117,6 @@ func Update(currentVersion string) error {
 	fmt.Printf("Updated to %s (%d bytes)\n", release.TagName, written)
 	fmt.Printf("Binary: %s\n", exePath)
 
-	// Clean up notice file
 	homeDir, err := os.UserHomeDir()
 	if err == nil {
 		os.Remove(filepath.Join(homeDir, ".mb", "update_available"))

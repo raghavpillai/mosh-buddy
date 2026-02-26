@@ -19,9 +19,7 @@ type githubRelease struct {
 	TagName string `json:"tag_name"`
 }
 
-// CheckInBackground spawns a goroutine that checks for updates and writes
-// a notice file if a newer version exists. Returns a done channel that closes
-// when the check completes (so callers can optionally wait).
+// CheckInBackground checks for updates in a goroutine. Returns a done channel.
 func CheckInBackground(currentVersion, mbDir string) <-chan struct{} {
 	done := make(chan struct{})
 	if currentVersion == "dev" || mbDir == "" {
@@ -35,13 +33,11 @@ func CheckInBackground(currentVersion, mbDir string) <-chan struct{} {
 	return done
 }
 
-// PrintUpdateNotice waits briefly for the background check to finish,
-// then prints an update notice if one exists.
+// PrintUpdateNotice prints an update notice if a newer version is available.
 func PrintUpdateNotice(currentVersion, mbDir string, done <-chan struct{}) {
 	if mbDir == "" {
 		return
 	}
-	// Wait up to 3 seconds for the background check to finish
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
@@ -61,7 +57,6 @@ func PrintUpdateNotice(currentVersion, mbDir string, done <-chan struct{}) {
 }
 
 func checkForUpdate(currentVersion, mbDir string) error {
-	// Check cooldown
 	checkFile := filepath.Join(mbDir, "last_update_check")
 	if info, err := os.Stat(checkFile); err == nil {
 		if time.Since(info.ModTime()) < checkCooldown {
@@ -69,7 +64,6 @@ func checkForUpdate(currentVersion, mbDir string) error {
 		}
 	}
 
-	// Fetch latest release
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(repoAPI)
 	if err != nil {
@@ -86,24 +80,20 @@ func checkForUpdate(currentVersion, mbDir string) error {
 		return err
 	}
 
-	// Update check timestamp
 	_ = os.MkdirAll(mbDir, 0700)
 	_ = os.WriteFile(checkFile, []byte(time.Now().Format(time.RFC3339)), 0600)
 
-	// Compare versions
 	if isNewer(release.TagName, currentVersion) {
 		noticePath := filepath.Join(mbDir, "update_available")
 		_ = os.WriteFile(noticePath, []byte(release.TagName), 0600)
 	} else {
-		// Clear stale notice
 		os.Remove(filepath.Join(mbDir, "update_available"))
 	}
 
 	return nil
 }
 
-// isNewer returns true if remote is a newer semver than current.
-// Expects tags like "v1.2.3". Falls back to string comparison.
+// isNewer compares semver tags like "v1.2.3".
 func isNewer(remote, current string) bool {
 	r := parseVersion(remote)
 	c := parseVersion(current)

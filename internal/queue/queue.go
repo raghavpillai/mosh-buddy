@@ -66,7 +66,7 @@ func (q *Queue) Drain(sessionID string) ([]*protocol.Message, error) {
 	var messages []*protocol.Message
 	for _, name := range names {
 		path := filepath.Join(dir, name)
-		// Atomically claim the file by renaming it (prevents duplicate drain)
+		// Atomic rename prevents duplicate drain
 		claimedPath := path + ".draining"
 		if err := os.Rename(path, claimedPath); err != nil {
 			continue // another goroutine already claimed it
@@ -104,7 +104,6 @@ func (q *Queue) Pending(sessionID string) (int, error) {
 	return count, nil
 }
 
-// Enqueue with explicit nanosecond timestamp for ordering
 func (q *Queue) EnqueueAt(sessionID string, msg *protocol.Message, nanos int64) error {
 	dir := q.sessionDir(sessionID)
 	if err := os.MkdirAll(dir, 0700); err != nil {

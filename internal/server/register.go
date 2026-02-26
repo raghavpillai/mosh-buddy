@@ -23,7 +23,7 @@ func Register(args []string) error {
 		return err
 	}
 
-	// Read key from stdin if not provided as flag (avoids exposure in ps output)
+	// Read from stdin to avoid exposure in ps output
 	if *key == "" {
 		scanner := bufio.NewScanner(os.Stdin)
 		if scanner.Scan() {
@@ -36,12 +36,10 @@ func Register(args []string) error {
 		return fmt.Errorf("usage: mb _register --session=UUID --port=PORT [--key=KEY or key via stdin]")
 	}
 
-	// Validate key
 	if _, err := security.KeyFromHex(*key); err != nil {
 		return fmt.Errorf("invalid key: %w", err)
 	}
 
-	// Store key to disk
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("cannot determine home directory: %w", err)
@@ -54,7 +52,6 @@ func Register(args []string) error {
 		return fmt.Errorf("write key: %w", err)
 	}
 
-	// Connect to server daemon
 	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
@@ -62,7 +59,6 @@ func Register(args []string) error {
 	}
 	defer conn.Close()
 
-	// Send register message
 	msg := &protocol.Message{
 		Type:      "register",
 		SessionID: *session,
@@ -73,7 +69,6 @@ func Register(args []string) error {
 		return fmt.Errorf("send register: %w", err)
 	}
 
-	// Read response
 	resp, err := protocol.Decode(conn)
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
@@ -102,15 +97,13 @@ func Deregister(args []string) error {
 		return fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	// Remove session key from disk
 	keyDir := filepath.Join(homeDir, ".mb", "sessions", *session)
 	os.RemoveAll(keyDir)
 
-	// Connect to server daemon and send deregister
 	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
-		// Server daemon may not be running, that's fine — disk cleanup is enough
+		// Daemon may not be running — disk cleanup is enough
 		log.Printf("server daemon not reachable, disk cleanup done")
 		return nil
 	}

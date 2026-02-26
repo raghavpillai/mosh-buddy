@@ -30,7 +30,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Resolve mbDir once for update checks
 	mbDir := ""
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		mbDir = filepath.Join(homeDir, ".mb")
@@ -98,7 +97,6 @@ func runServerDaemon(args []string) error {
 	}
 	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
 
-	// Ensure directories exist with correct permissions
 	for _, dir := range []string{
 		filepath.Join(homeDir, ".mb"),
 		filepath.Join(homeDir, ".mb", "sessions"),
@@ -132,7 +130,6 @@ func remoteExec(command string, args []string) error {
 		return fmt.Errorf("MB_SESSION not set. Are you inside an mb connect session?")
 	}
 
-	// Read stdin if piped
 	var stdin []byte
 	fi, _ := os.Stdin.Stat()
 	if fi.Mode()&os.ModeCharDevice == 0 {
@@ -143,7 +140,6 @@ func remoteExec(command string, args []string) error {
 		}
 	}
 
-	// Connect to server daemon
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("cannot determine home directory: %w", err)
@@ -155,7 +151,6 @@ func remoteExec(command string, args []string) error {
 	}
 	defer conn.Close()
 
-	// Expand {MB_*} placeholders in command and args
 	command, err = expandPlaceholders(command)
 	if err != nil {
 		return err
@@ -167,7 +162,7 @@ func remoteExec(command string, args []string) error {
 		}
 	}
 
-	// Build and send exec message (unsigned — server daemon will sign it)
+	// Unsigned — server daemon signs before forwarding
 	msg := &protocol.Message{
 		Type:      "exec",
 		SessionID: sessionID,
@@ -179,7 +174,6 @@ func remoteExec(command string, args []string) error {
 		return fmt.Errorf("send command: %w", err)
 	}
 
-	// Read response
 	resp, err := protocol.Decode(conn)
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
@@ -200,7 +194,7 @@ func handleStatus() error {
 		return fmt.Errorf("cannot determine home directory: %w", err)
 	}
 
-	// Check for server daemon (attempt to connect, not just stat the file)
+	// Probe via connect, not stat (stale socket file may exist)
 	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
 	if sconn, serr := net.Dial("unix", socketPath); serr == nil {
 		sconn.Close()
@@ -209,7 +203,6 @@ func handleStatus() error {
 		fmt.Println("Server daemon: not running")
 	}
 
-	// Check for client daemon
 	conn, err := net.Dial("tcp", "127.0.0.1:4444")
 	if err == nil {
 		conn.Close()
@@ -218,7 +211,6 @@ func handleStatus() error {
 		fmt.Println("Client daemon: not running")
 	}
 
-	// List sessions
 	sessDir := filepath.Join(homeDir, ".mb", "sessions")
 	entries, err := os.ReadDir(sessDir)
 	if err == nil && len(entries) > 0 {

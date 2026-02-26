@@ -112,7 +112,6 @@ func (d *ClientDaemon) handleConn(conn net.Conn) {
 		return
 	}
 
-	// Load session key
 	key, err := d.loadSessionKey(msg.SessionID)
 	if err != nil {
 		log.Printf("session %s: key load error: %v", msg.SessionID, err)
@@ -120,21 +119,18 @@ func (d *ClientDaemon) handleConn(conn net.Conn) {
 		return
 	}
 
-	// Verify HMAC
 	if !security.Verify(key, msg) {
 		log.Printf("session %s: HMAC verification failed for command %q", msg.SessionID, msg.Command)
 		sendError(conn, msg.SessionID, "HMAC verification failed")
 		return
 	}
 
-	// Validate timestamp
 	if !security.ValidateTimestamp(msg.Timestamp, 5*time.Minute) {
 		log.Printf("session %s: stale timestamp for command %q", msg.SessionID, msg.Command)
 		sendError(conn, msg.SessionID, "stale timestamp")
 		return
 	}
 
-	// Check allowlist
 	action := d.checkCommand(msg.Command)
 	if action != "allow" {
 		log.Printf("session %s: DENIED command %q", msg.SessionID, msg.Command)
@@ -142,7 +138,6 @@ func (d *ClientDaemon) handleConn(conn net.Conn) {
 		return
 	}
 
-	// Execute
 	log.Printf("session %s: executing %s %s", msg.SessionID, msg.Command, strings.Join(msg.Args, " "))
 	cmd := exec.Command(msg.Command, msg.Args...)
 	if len(msg.Stdin) > 0 {
@@ -184,7 +179,6 @@ func (d *ClientDaemon) checkCommand(cmd string) string {
 			return "deny"
 		}
 	}
-	// Unknown command: log warning, reject (v2 will add desktop notification prompt)
 	return "deny"
 }
 

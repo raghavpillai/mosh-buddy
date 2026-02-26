@@ -55,12 +55,10 @@ func NewServerDaemonWithDir(socketPath, mbDir string) *ServerDaemon {
 }
 
 func (d *ServerDaemon) Run(ctx context.Context) error {
-	// Remove stale socket
 	if _, err := os.Stat(d.socketPath); err == nil {
 		os.Remove(d.socketPath)
 	}
 
-	// Ensure parent directory exists with correct permissions
 	socketDir := filepath.Dir(d.socketPath)
 	if err := os.MkdirAll(socketDir, 0700); err != nil {
 		return fmt.Errorf("create socket dir: %w", err)
@@ -78,12 +76,10 @@ func (d *ServerDaemon) Run(ctx context.Context) error {
 		return fmt.Errorf("chmod socket: %w", err)
 	}
 
-	// Recover sessions from disk
 	d.recoverSessions()
 
 	log.Printf("server daemon listening on %s", d.socketPath)
 
-	// Start queue drain loop
 	go d.drainLoop(ctx)
 
 	go func() {
@@ -158,7 +154,6 @@ func (d *ServerDaemon) handleRegister(conn net.Conn, msg *protocol.Message) {
 	}
 	d.mu.Unlock()
 
-	// Store key to disk
 	keyDir := filepath.Join(d.mbDir, "sessions", msg.SessionID)
 	if err := os.MkdirAll(keyDir, 0700); err != nil {
 		log.Printf("register: mkdir error: %v", err)
@@ -184,7 +179,6 @@ func (d *ServerDaemon) handleDeregister(conn net.Conn, msg *protocol.Message) {
 	delete(d.sessions, msg.SessionID)
 	d.mu.Unlock()
 
-	// Clean up key file
 	keyDir := filepath.Join(d.mbDir, "sessions", msg.SessionID)
 	os.RemoveAll(keyDir)
 
@@ -230,14 +224,12 @@ func (d *ServerDaemon) handleExec(conn net.Conn, msg *protocol.Message) {
 		return
 	}
 
-	// Sign the message
 	msg.Timestamp = time.Now().Unix()
 	msg.HMAC = security.Sign(session.Key, msg)
 
-	// Try to forward through tunnel
 	resp, err := d.forwardToTunnel(session.Port, msg)
 	if err != nil {
-		// Dial/network error — tunnel is down, queue the message
+		// Tunnel down — queue for later delivery
 		log.Printf("session %s: tunnel unreachable (%v), queuing", msg.SessionID, err)
 		if qErr := d.queue.Enqueue(msg.SessionID, msg); qErr != nil {
 			log.Printf("session %s: queue error: %v", msg.SessionID, qErr)
@@ -255,7 +247,6 @@ func (d *ServerDaemon) handleExec(conn net.Conn, msg *protocol.Message) {
 		return
 	}
 
-	// Forward the client's response back to the caller
 	_ = protocol.Encode(conn, resp)
 }
 
@@ -272,7 +263,6 @@ func (d *ServerDaemon) forwardToTunnel(port int, msg *protocol.Message) (*protoc
 		return nil, fmt.Errorf("encode: %w", err)
 	}
 
-	// Read response from client
 	resp, err := protocol.Decode(conn)
 	if err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
@@ -305,7 +295,7 @@ func (d *ServerDaemon) drainAll() {
 
 	for sessionID, session := range sessions {
 		if session.Port == 0 {
-			continue // port unknown, awaiting re-register
+			continue
 		}
 
 		pending, _ := d.queue.Pending(sessionID)
@@ -313,7 +303,6 @@ func (d *ServerDaemon) drainAll() {
 			continue
 		}
 
-		// Drain and attempt to forward — no probe, just try directly
 		msgs, err := d.queue.Drain(sessionID)
 		if err != nil {
 			log.Printf("drain error for session %s: %v", sessionID, err)
@@ -321,13 +310,11 @@ func (d *ServerDaemon) drainAll() {
 		}
 
 		for i, msg := range msgs {
-			// Re-stamp and re-sign
 			msg.Timestamp = time.Now().Unix()
 			msg.HMAC = security.Sign(session.Key, msg)
 
 			if _, err := d.forwardToTunnel(session.Port, msg); err != nil {
 				log.Printf("drain forward error for session %s: %v", sessionID, err)
-				// Re-queue this message and all remaining
 				for j := i; j < len(msgs); j++ {
 					if err := d.queue.Enqueue(sessionID, msgs[j]); err != nil {
 						log.Printf("session %s: re-queue error: %v", sessionID, err)
@@ -360,8 +347,7 @@ func (d *ServerDaemon) recoverSessions() {
 		if err != nil {
 			continue
 		}
-		// We don't know the port, so session won't be routable until re-registered
-		// But we store the key so _register can update the port
+		// Port unknown — not routable until re-registered, but store key
 		d.mu.Lock()
 		d.sessions[sessionID] = &SessionInfo{Key: key}
 		d.mu.Unlock()
