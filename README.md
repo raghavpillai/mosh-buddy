@@ -26,14 +26,23 @@ Every command is HMAC-SHA256 signed with a per-session key, checked against an a
 ## Install
 
 ```sh
-# build from source
-go build -o mb ./cmd/mb
-
-# or cross-compile
-make all   # builds linux/darwin x amd64/arm64
+curl -fsSL https://raw.githubusercontent.com/raghavpillai/mosh-buddy/main/install.sh | sh
 ```
 
-Single static binary, zero external dependencies. Copy it to both machines.
+Or build from source:
+
+```sh
+go build -o mb ./cmd/mb
+```
+
+Single static binary, zero external dependencies. Install it on both machines (local and remote).
+
+To make `mosh` automatically use mosh-buddy:
+
+```sh
+# add to your .bashrc / .zshrc
+alias mosh='mb connect'
+```
 
 ## Usage
 
