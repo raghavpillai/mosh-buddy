@@ -231,6 +231,10 @@ func expandPlaceholders(s string) (string, error) {
 			return match
 		}
 		val := os.Getenv(name)
+		// MB_CWD falls back to PWD
+		if val == "" && name == "MB_CWD" {
+			val, _ = os.Getwd()
+		}
 		if val == "" {
 			expandErr = fmt.Errorf("placeholder %s is empty (are you inside an mb connect session?)", match)
 			return match
@@ -256,12 +260,13 @@ Usage:
 Placeholders (expanded from environment):
   {MB_HOST}    Remote hostname (from mb connect target)
   {MB_USER}    Remote username (from mb connect target)
+  {MB_CWD}     Current working directory on remote
   {MB_SESSION} Session UUID
 
 Examples (on remote, inside mb connect session):
   mb open https://example.com                      Open URL in local browser
   echo "text" | mb pbcopy                          Copy to local clipboard
   mb notify-send "build finished"                  Local desktop notification
-  mb zed ssh://{MB_USER}@{MB_HOST}$PWD             Open remote dir in local Zed
-  mb code --remote ssh-remote+{MB_HOST} $PWD       Open remote dir in local VS Code`)
+  mb zed ssh://{MB_USER}@{MB_HOST}{MB_CWD}          Open remote dir in local Zed
+  mb code --remote ssh-remote+{MB_HOST} {MB_CWD}   Open remote dir in local VS Code`)
 }
