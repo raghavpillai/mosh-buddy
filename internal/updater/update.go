@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,7 +27,14 @@ func Update(currentVersion string) error {
 	fmt.Printf("Current version: %s\n", currentVersion)
 	fmt.Println("Checking for updates...")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	// No overall timeout — the binary download can be slow on some connections.
+	// Only the TCP dial and TLS handshake are time-bounded.
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+	}
 
 	// Fetch release info
 	resp, err := client.Get(repoAPI)
