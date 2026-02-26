@@ -1,0 +1,217 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+
+	"github.com/raghav/mosh-buddy/internal/client"
+	"github.com/raghav/mosh-buddy/internal/protocol"
+	"github.com/raghav/mosh-buddy/internal/server"
+)
+
+func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
+	}
+
+	var err error
+	switch os.Args[1] {
+	case "connect":
+		err = client.Connect(os.Args[2:])
+	case "client-daemon":
+		err = runClientDaemon(os.Args[2:])
+	case "server-daemon":
+		err = runServerDaemon(os.Args[2:])
+	case "_register":
+		err = server.Register(os.Args[2:])
+	case "_deregister":
+		err = server.Deregister(os.Args[2:])
+	case "status":
+		err = handleStatus()
+	case "help", "--help", "-h":
+		printUsage()
+	default:
+		err = remoteExec(os.Args[1], os.Args[2:])
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runClientDaemon(args []string) error {
+	fs := flag.NewFlagSet("client-daemon", flag.ExitOnError)
+	port := fs.Int("port", 4444, "port to listen on")
+	fs.Parse(args)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	daemon := client.NewClientDaemon(*port)
+	return daemon.Run(ctx)
+}
+
+func runServerDaemon(args []string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
+
+	// Ensure directories exist with correct permissions
+	for _, dir := range []string{
+		filepath.Join(homeDir, ".mb"),
+		filepath.Join(homeDir, ".mb", "sessions"),
+		filepath.Join(homeDir, ".mb", "queue"),
+	} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+		os.Chmod(dir, 0700)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancel()
+	}()
+
+	daemon := server.NewServerDaemon(socketPath)
+	return daemon.Run(ctx)
+}
+
+func remoteExec(command string, args []string) error {
+	sessionID := os.Getenv("MB_SESSION")
+	if sessionID == "" {
+		return fmt.Errorf("MB_SESSION not set. Are you inside an mb connect session?")
+	}
+
+	// Read stdin if piped
+	var stdin []byte
+	fi, _ := os.Stdin.Stat()
+	if fi.Mode()&os.ModeCharDevice == 0 {
+		var err error
+		stdin, err = io.ReadAll(io.LimitReader(os.Stdin, protocol.MaxMessageSize))
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+	}
+
+	// Connect to server daemon
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("connect to server daemon: %w (is mb server-daemon running?)", err)
+	}
+	defer conn.Close()
+
+	// Build and send exec message (unsigned — server daemon will sign it)
+	msg := &protocol.Message{
+		Type:      "exec",
+		SessionID: sessionID,
+		Command:   command,
+		Args:      args,
+		Stdin:     stdin,
+	}
+	if err := protocol.Encode(conn, msg); err != nil {
+		return fmt.Errorf("send command: %w", err)
+	}
+
+	// Read response
+	resp, err := protocol.Decode(conn)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	if resp.Type == "error" {
+		return fmt.Errorf("%s", resp.Error)
+	}
+	if len(resp.Output) > 0 {
+		os.Stdout.Write(resp.Output)
+	}
+
+	return nil
+}
+
+func handleStatus() error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("cannot determine home directory: %w", err)
+	}
+
+	// Check for server daemon (attempt to connect, not just stat the file)
+	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
+	if sconn, serr := net.Dial("unix", socketPath); serr == nil {
+		sconn.Close()
+		fmt.Println("Server daemon: running")
+	} else {
+		fmt.Println("Server daemon: not running")
+	}
+
+	// Check for client daemon
+	conn, err := net.Dial("tcp", "127.0.0.1:4444")
+	if err == nil {
+		conn.Close()
+		fmt.Println("Client daemon: running on port 4444")
+	} else {
+		fmt.Println("Client daemon: not running")
+	}
+
+	// List sessions
+	sessDir := filepath.Join(homeDir, ".mb", "sessions")
+	entries, err := os.ReadDir(sessDir)
+	if err == nil && len(entries) > 0 {
+		fmt.Printf("\nActive sessions:\n")
+		for _, e := range entries {
+			if e.IsDir() {
+				fmt.Printf("  - %s\n", e.Name())
+			}
+		}
+	} else {
+		fmt.Println("\nNo active sessions")
+	}
+
+	return nil
+}
+
+func printUsage() {
+	fmt.Println(`mosh-buddy (mb) — side-channel for mosh sessions
+
+Usage:
+  mb connect user@host       Start a mosh session with side-channel
+  mb client-daemon [--port]  Start the client daemon (usually auto-started)
+  mb server-daemon           Start the server daemon
+  mb status                  Show daemon and session status
+  mb <command> [args...]     Execute command on local machine (from remote)
+
+Examples (on remote, inside mb connect session):
+  mb open https://example.com       Open URL in local browser
+  echo "text" | mb pbcopy           Copy to local clipboard
+  mb notify "build finished"        Local desktop notification`)
+}
