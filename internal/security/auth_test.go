@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/raghav/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
 )
 
 func TestGenerateKey(t *testing.T) {

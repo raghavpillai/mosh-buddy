@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/raghav/mosh-buddy/internal/client"
-	"github.com/raghav/mosh-buddy/internal/protocol"
-	"github.com/raghav/mosh-buddy/internal/security"
-	"github.com/raghav/mosh-buddy/internal/server"
+	"github.com/raghavpillai/mosh-buddy/internal/client"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/security"
+	"github.com/raghavpillai/mosh-buddy/internal/server"
 )
 
 func TestIntegrationBasicFlow(t *testing.T) {

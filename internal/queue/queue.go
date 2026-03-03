@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/raghav/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
 )
 
 var enqueueCounter uint64

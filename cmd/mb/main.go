@@ -14,10 +14,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/raghav/mosh-buddy/internal/client"
-	"github.com/raghav/mosh-buddy/internal/protocol"
-	"github.com/raghav/mosh-buddy/internal/server"
-	"github.com/raghav/mosh-buddy/internal/updater"
+	"github.com/raghavpillai/mosh-buddy/internal/client"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/server"
+	"github.com/raghavpillai/mosh-buddy/internal/updater"
 )
 
 var version = "dev"

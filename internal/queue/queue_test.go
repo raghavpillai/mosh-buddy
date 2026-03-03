@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/raghav/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
 )
 
 func tempQueue(t *testing.T) *Queue {

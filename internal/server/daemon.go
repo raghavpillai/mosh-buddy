@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/raghav/mosh-buddy/internal/protocol"
-	"github.com/raghav/mosh-buddy/internal/queue"
-	"github.com/raghav/mosh-buddy/internal/security"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/queue"
+	"github.com/raghavpillai/mosh-buddy/internal/security"
 )
 
 type SessionInfo struct {

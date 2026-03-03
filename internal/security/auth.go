@@ -9,7 +9,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/raghav/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
 )
 
 func GenerateKey() ([]byte, error) {
