@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/raghav/mosh-buddy/internal/security"
+	"github.com/raghavpillai/mosh-buddy/internal/security"
 )
 
 func Connect(args []string) error {
@@ -48,7 +48,7 @@ func Connect(args []string) error {
 	log.Printf("using tunnel port %d", tunnelPort)
 
 	// Key passed via stdin to avoid ps visibility
-	registerCmd := fmt.Sprintf("mb _register --session=%s --port=%d", sessionID, tunnelPort)
+	registerCmd := remoteCmd(fmt.Sprintf("mb _register --session=%s --port=%d", sessionID, tunnelPort))
 	log.Printf("registering session on %s", target)
 	cmd := exec.Command("ssh", target, registerCmd)
 	cmd.Stdin = strings.NewReader(hexKey + "\n")
@@ -82,12 +82,7 @@ func Connect(args []string) error {
 
 	go tunnelMonitor(ctx, target, tunnelPort, clientPort, sessionID, hexKey)
 
-	mbUser := ""
-	mbHost := target
-	if i := strings.Index(target, "@"); i >= 0 {
-		mbUser = target[:i]
-		mbHost = target[i+1:]
-	}
+	mbUser, mbHost := resolveTarget(target)
 	moshServer := fmt.Sprintf("env MB_SESSION=%s MB_PORT=%d MB_HOST=%s MB_USER=%s mosh-server",
 		sessionID, tunnelPort, mbHost, mbUser)
 	moshCmd := exec.Command("mosh", "--server="+moshServer, target)
@@ -96,6 +91,14 @@ func Connect(args []string) error {
 	moshCmd.Stderr = os.Stderr
 
 	log.Printf("launching mosh to %s", target)
+
+	// Redirect logging to file so background goroutines don't corrupt the terminal
+	logFile, err := os.OpenFile(filepath.Join(homeDir, ".mb", "connect.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err == nil {
+		log.SetOutput(logFile)
+		defer logFile.Close()
+	}
+
 	moshErr := moshCmd.Run()
 
 	cancel()
@@ -120,7 +123,6 @@ func tunnelMonitor(ctx context.Context, target string, tunnelPort, clientPort in
 			"-R", tunnelArg,
 			"-o", "ServerAliveInterval=10",
 			"-o", "ServerAliveCountMax=3",
-			"-o", "ExitOnForwardFailure=yes",
 			target,
 		)
 
@@ -142,7 +144,7 @@ func tunnelMonitor(ctx context.Context, target string, tunnelPort, clientPort in
 		}
 
 		// Re-register in case port changed (for now same port)
-		registerCmd := fmt.Sprintf("mb _register --session=%s --port=%d", sessionID, tunnelPort)
+		registerCmd := remoteCmd(fmt.Sprintf("mb _register --session=%s --port=%d", sessionID, tunnelPort))
 		reReg := exec.Command("ssh", target, registerCmd)
 		reReg.Stdin = strings.NewReader(hexKey + "\n")
 		_ = reReg.Run() // best-effort
@@ -198,8 +200,39 @@ func cleanup(target, sessionID, homeDir string) {
 	os.RemoveAll(keyDir)
 
 	// Best-effort deregister cleans both disk and in-memory state
-	cmd := exec.Command("ssh", target, fmt.Sprintf("mb _deregister --session=%s", sessionID))
+	cmd := exec.Command("ssh", target, remoteCmd(fmt.Sprintf("mb _deregister --session=%s", sessionID)))
 	_ = cmd.Run()
+}
+
+// resolveTarget extracts user and host from the target. If no user@ prefix is
+// present, it queries `ssh -G` to resolve the effective username from SSH config.
+func resolveTarget(target string) (user, host string) {
+	host = target
+	if i := strings.Index(target, "@"); i >= 0 {
+		return target[:i], target[i+1:]
+	}
+	out, err := exec.Command("ssh", "-G", target).Output()
+	if err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.HasPrefix(line, "user ") {
+				user = strings.TrimPrefix(line, "user ")
+				break
+			}
+		}
+	}
+	if user == "" {
+		if u, err := os.UserHomeDir(); err == nil {
+			user = filepath.Base(u)
+		}
+	}
+	return
+}
+
+// remoteCmd wraps a command so common user bin directories are in PATH.
+// Non-interactive SSH sessions don't source .bashrc/.profile, so mb installed
+// to ~/.local/bin wouldn't be found otherwise.
+func remoteCmd(cmd string) string {
+	return fmt.Sprintf("PATH=$HOME/.local/bin:$HOME/bin:$PATH %s", cmd)
 }
 
 func generateUUID() (string, error) {

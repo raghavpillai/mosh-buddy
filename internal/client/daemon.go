@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -12,26 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/raghav/mosh-buddy/internal/protocol"
-	"github.com/raghav/mosh-buddy/internal/security"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/security"
 )
-
-type Config struct {
-	Allow         []string `json:"allow"`
-	Deny          []string `json:"deny"`
-	PromptUnknown bool     `json:"prompt_unknown"`
-}
-
-var DefaultConfig = Config{
-	Allow:         []string{"open", "xdg-open", "pbcopy", "pbpaste", "xclip", "xsel", "notify-send"},
-	Deny:          []string{"rm", "sudo", "sh", "bash", "zsh", "curl", "wget"},
-	PromptUnknown: true,
-}
 
 type ClientDaemon struct {
 	port     int
 	listener net.Listener
-	config   Config
 	mbDir    string
 }
 
@@ -42,24 +28,11 @@ func NewClientDaemon(port int) *ClientDaemon {
 	}
 	mbDir := filepath.Join(homeDir, ".mb")
 	return &ClientDaemon{
-		port:   port,
-		config: loadConfig(mbDir),
-		mbDir:  mbDir,
+		port:  port,
+		mbDir: mbDir,
 	}
 }
 
-func loadConfig(mbDir string) Config {
-	path := filepath.Join(mbDir, "config.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return DefaultConfig
-	}
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return DefaultConfig
-	}
-	return cfg
-}
 
 func (d *ClientDaemon) Run(ctx context.Context) error {
 	addr := fmt.Sprintf("127.0.0.1:%d", d.port)
@@ -131,13 +104,6 @@ func (d *ClientDaemon) handleConn(conn net.Conn) {
 		return
 	}
 
-	action := d.checkCommand(msg.Command)
-	if action != "allow" {
-		log.Printf("session %s: DENIED command %q", msg.SessionID, msg.Command)
-		sendError(conn, msg.SessionID, fmt.Sprintf("command %q is not allowed", msg.Command))
-		return
-	}
-
 	log.Printf("session %s: executing %s %s", msg.SessionID, msg.Command, strings.Join(msg.Args, " "))
 	cmd := exec.Command(msg.Command, msg.Args...)
 	if len(msg.Stdin) > 0 {
@@ -167,20 +133,6 @@ func (d *ClientDaemon) loadSessionKey(sessionID string) ([]byte, error) {
 	return security.KeyFromHex(strings.TrimSpace(string(data)))
 }
 
-func (d *ClientDaemon) checkCommand(cmd string) string {
-	base := filepath.Base(cmd)
-	for _, allowed := range d.config.Allow {
-		if base == allowed {
-			return "allow"
-		}
-	}
-	for _, denied := range d.config.Deny {
-		if base == denied {
-			return "deny"
-		}
-	}
-	return "deny"
-}
 
 func sendError(conn net.Conn, sessionID string, errMsg string) {
 	_ = protocol.Encode(conn, &protocol.Message{

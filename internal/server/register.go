@@ -7,11 +7,14 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
-	"github.com/raghav/mosh-buddy/internal/protocol"
-	"github.com/raghav/mosh-buddy/internal/security"
+	"github.com/raghavpillai/mosh-buddy/internal/protocol"
+	"github.com/raghavpillai/mosh-buddy/internal/security"
 )
 
 func Register(args []string) error {
@@ -55,7 +58,14 @@ func Register(args []string) error {
 	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
-		return fmt.Errorf("connect to server daemon: %w", err)
+		log.Printf("server daemon not running, starting automatically...")
+		if startErr := autoStartServerDaemon(homeDir, socketPath); startErr != nil {
+			return fmt.Errorf("server daemon not running and auto-start failed: %w", startErr)
+		}
+		conn, err = net.Dial("unix", socketPath)
+		if err != nil {
+			return fmt.Errorf("connect to server daemon after auto-start: %w", err)
+		}
 	}
 	defer conn.Close()
 
@@ -127,4 +137,47 @@ func Deregister(args []string) error {
 
 	log.Printf("session %s deregistered", *session)
 	return nil
+}
+
+func autoStartServerDaemon(homeDir, socketPath string) error {
+	for _, dir := range []string{
+		filepath.Join(homeDir, ".mb"),
+		filepath.Join(homeDir, ".mb", "sessions"),
+		filepath.Join(homeDir, ".mb", "queue"),
+	} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find executable: %w", err)
+	}
+
+	logPath := filepath.Join(homeDir, ".mb", "server.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	cmd := exec.Command(exe, "server-daemon")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return fmt.Errorf("start server daemon: %w", err)
+	}
+	logFile.Close()
+
+	for i := 0; i < 30; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if conn, dialErr := net.Dial("unix", socketPath); dialErr == nil {
+			conn.Close()
+			log.Printf("server daemon started (pid %d)", cmd.Process.Pid)
+			return nil
+		}
+	}
+	return fmt.Errorf("server daemon started but socket not ready after 3s")
 }
