@@ -125,6 +125,7 @@ func runServerDaemon(args []string) error {
 }
 
 func remoteExec(command string, args []string) error {
+	loadEnvFallback()
 	sessionID := os.Getenv("MB_SESSION")
 	if sessionID == "" {
 		return fmt.Errorf("MB_SESSION not set. Are you inside an mb connect session?")
@@ -227,6 +228,29 @@ func handleStatus() error {
 	return nil
 }
 
+// loadEnvFallback loads MB_* vars from ~/.mb/env when they aren't already set.
+// This allows mb commands to work in tmux sessions or new shells that don't
+// inherit the environment from the original mb connect shell.
+func loadEnvFallback() {
+	if os.Getenv("MB_SESSION") != "" {
+		return
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(homeDir, ".mb", "env"))
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		if ok && os.Getenv(k) == "" {
+			os.Setenv(k, v)
+		}
+	}
+}
+
 var placeholderRe = regexp.MustCompile(`\{[^}]+\}`)
 
 // expandPlaceholders replaces {MB_*} placeholders with their environment values.
@@ -260,7 +284,7 @@ func printUsage() {
 	fmt.Printf(`mosh-buddy (mb) %s — side-channel for mosh sessions
 
 Usage:
-  mb connect user@host       Start a mosh session with side-channel
+  mb connect [--ssh] user@host  Start a session with side-channel (mosh default, --ssh for SSH)
   mb client-daemon [--port]  Start the client daemon (usually auto-started)
   mb server-daemon           Start the server daemon
   mb status                  Show daemon and session status

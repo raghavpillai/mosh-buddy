@@ -22,6 +22,8 @@ func Register(args []string) error {
 	session := fs.String("session", "", "session UUID")
 	port := fs.Int("port", 0, "tunnel port")
 	key := fs.String("key", "", "hex-encoded HMAC key")
+	host := fs.String("host", "", "remote hostname for MB_HOST")
+	user := fs.String("user", "", "remote username for MB_USER")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -87,6 +89,12 @@ func Register(args []string) error {
 		return fmt.Errorf("registration failed: %s", resp.Error)
 	}
 
+	// Write env file so mb works in tmux/new shells without MB_* env vars
+	envContent := fmt.Sprintf("MB_SESSION=%s\nMB_PORT=%d\nMB_HOST=%s\nMB_USER=%s\n",
+		*session, *port, *host, *user)
+	envPath := filepath.Join(homeDir, ".mb", "env")
+	_ = os.WriteFile(envPath, []byte(envContent), 0600)
+
 	log.Printf("session %s registered on port %d", *session, *port)
 	return nil
 }
@@ -109,6 +117,14 @@ func Deregister(args []string) error {
 
 	keyDir := filepath.Join(homeDir, ".mb", "sessions", *session)
 	os.RemoveAll(keyDir)
+
+	// Clean env file if it belongs to this session
+	envPath := filepath.Join(homeDir, ".mb", "env")
+	if data, err := os.ReadFile(envPath); err == nil {
+		if strings.Contains(string(data), "MB_SESSION="+*session) {
+			os.Remove(envPath)
+		}
+	}
 
 	socketPath := filepath.Join(homeDir, ".mb", "mb.sock")
 	conn, err := net.Dial("unix", socketPath)
