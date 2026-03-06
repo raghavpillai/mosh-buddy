@@ -19,9 +19,24 @@ import (
 
 func Connect(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: mb connect user@host")
+		return fmt.Errorf("usage: mb connect [--ssh] user@host")
 	}
-	target := args[0]
+
+	useSSH := false
+	var target string
+	for _, a := range args {
+		switch a {
+		case "--ssh":
+			useSSH = true
+		default:
+			if target == "" {
+				target = a
+			}
+		}
+	}
+	if target == "" {
+		return fmt.Errorf("usage: mb connect [--ssh] user@host")
+	}
 
 	sessionID, err := generateUUID()
 	if err != nil {
@@ -47,8 +62,11 @@ func Connect(args []string) error {
 	}
 	log.Printf("using tunnel port %d", tunnelPort)
 
+	mbUser, mbHost := resolveTarget(target)
+
 	// Key passed via stdin to avoid ps visibility
-	registerCmd := remoteCmd(fmt.Sprintf("mb _register --session=%s --port=%d", sessionID, tunnelPort))
+	registerCmd := remoteCmd(fmt.Sprintf("mb _register --session=%s --port=%d --host=%s --user=%s",
+		sessionID, tunnelPort, mbHost, mbUser))
 	log.Printf("registering session on %s", target)
 	cmd := exec.Command("ssh", target, registerCmd)
 	cmd.Stdin = strings.NewReader(hexKey + "\n")
@@ -82,15 +100,21 @@ func Connect(args []string) error {
 
 	go tunnelMonitor(ctx, target, tunnelPort, clientPort, sessionID, hexKey)
 
-	mbUser, mbHost := resolveTarget(target)
-	moshServer := fmt.Sprintf("env MB_SESSION=%s MB_PORT=%d MB_HOST=%s MB_USER=%s mosh-server",
-		sessionID, tunnelPort, mbHost, mbUser)
-	moshCmd := exec.Command("mosh", "--server="+moshServer, target)
-	moshCmd.Stdin = os.Stdin
-	moshCmd.Stdout = os.Stdout
-	moshCmd.Stderr = os.Stderr
-
-	log.Printf("launching mosh to %s", target)
+	var sessionCmd *exec.Cmd
+	if useSSH {
+		envPrefix := fmt.Sprintf("export MB_SESSION=%s MB_PORT=%d MB_HOST=%s MB_USER=%s;",
+			sessionID, tunnelPort, mbHost, mbUser)
+		sessionCmd = exec.Command("ssh", "-t", "-e", "none", target, envPrefix+" exec $SHELL -l")
+		log.Printf("launching ssh to %s", target)
+	} else {
+		moshServer := fmt.Sprintf("env MB_SESSION=%s MB_PORT=%d MB_HOST=%s MB_USER=%s mosh-server",
+			sessionID, tunnelPort, mbHost, mbUser)
+		sessionCmd = exec.Command("mosh", "--server="+moshServer, target)
+		log.Printf("launching mosh to %s", target)
+	}
+	sessionCmd.Stdin = os.Stdin
+	sessionCmd.Stdout = os.Stdout
+	sessionCmd.Stderr = os.Stderr
 
 	// Redirect logging to file so background goroutines don't corrupt the terminal
 	logFile, err := os.OpenFile(filepath.Join(homeDir, ".mb", "connect.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -99,13 +123,16 @@ func Connect(args []string) error {
 		defer logFile.Close()
 	}
 
-	moshErr := moshCmd.Run()
+	sessionErr := sessionCmd.Run()
 
 	cancel()
 	cleanup(target, sessionID, homeDir)
 
-	if moshErr != nil {
-		return fmt.Errorf("mosh: %w", moshErr)
+	if sessionErr != nil {
+		if useSSH {
+			return fmt.Errorf("ssh: %w", sessionErr)
+		}
+		return fmt.Errorf("mosh: %w", sessionErr)
 	}
 	return nil
 }
