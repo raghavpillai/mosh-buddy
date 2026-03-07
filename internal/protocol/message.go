@@ -82,5 +82,11 @@ func CanonicalPayload(msg *Message) []byte {
 	}
 	parts = append(parts, msg.Args...)
 	parts = append(parts, strconv.FormatInt(msg.Timestamp, 10))
-	return []byte(strings.Join(parts, "\n"))
+	parts = append(parts, strconv.Itoa(len(msg.Stdin)))
+	header := []byte(strings.Join(parts, "\n"))
+	result := make([]byte, len(header)+1+len(msg.Stdin))
+	copy(result, header)
+	result[len(header)] = '\n'
+	copy(result[len(header)+1:], msg.Stdin)
+	return result
 }

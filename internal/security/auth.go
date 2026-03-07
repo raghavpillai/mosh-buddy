@@ -24,8 +24,17 @@ func KeyToHex(key []byte) string {
 	return hex.EncodeToString(key)
 }
 
+const MinKeyLen = 32
+
 func KeyFromHex(s string) ([]byte, error) {
-	return hex.DecodeString(s)
+	key, err := hex.DecodeString(s)
+	if err != nil {
+		return nil, err
+	}
+	if len(key) < MinKeyLen {
+		return nil, fmt.Errorf("key too short: %d bytes, minimum %d", len(key), MinKeyLen)
+	}
+	return key, nil
 }
 
 func Sign(key []byte, msg *protocol.Message) string {

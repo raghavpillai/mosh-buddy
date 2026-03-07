@@ -123,6 +123,36 @@ func TestValidateTimestampFuture(t *testing.T) {
 	}
 }
 
+func TestTamperedStdin(t *testing.T) {
+	key, _ := GenerateKey()
+	msg := &protocol.Message{
+		Type:      "exec",
+		SessionID: "sess-1",
+		Command:   "pbcopy",
+		Stdin:     []byte("sensitive data"),
+		Timestamp: time.Now().Unix(),
+	}
+	msg.HMAC = Sign(key, msg)
+	msg.Stdin = []byte("replaced data")
+	if Verify(key, msg) {
+		t.Errorf("Verify should fail after tampering stdin")
+	}
+}
+
+func TestKeyFromHexMinLength(t *testing.T) {
+	// 16 bytes (too short, minimum is 32)
+	_, err := KeyFromHex("0123456789abcdef0123456789abcdef")
+	if err == nil {
+		t.Errorf("KeyFromHex should reject 16-byte key")
+	}
+
+	// 32 bytes (exactly minimum)
+	_, err = KeyFromHex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Errorf("KeyFromHex should accept 32-byte key: %v", err)
+	}
+}
+
 func TestKeyHexRoundTrip(t *testing.T) {
 	key, _ := GenerateKey()
 	hexStr := KeyToHex(key)
