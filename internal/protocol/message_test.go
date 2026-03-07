@@ -119,6 +119,44 @@ func TestInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestCanonicalPayloadIncludesStdin(t *testing.T) {
+	base := &Message{
+		Type:      "exec",
+		SessionID: "sess-1",
+		Command:   "pbcopy",
+		Timestamp: 1700000000,
+	}
+	withStdin := &Message{
+		Type:      "exec",
+		SessionID: "sess-1",
+		Command:   "pbcopy",
+		Stdin:     []byte("hello"),
+		Timestamp: 1700000000,
+	}
+	if bytes.Equal(CanonicalPayload(base), CanonicalPayload(withStdin)) {
+		t.Errorf("messages with different stdin should have different canonical payloads")
+	}
+}
+
+func TestValidateSessionID(t *testing.T) {
+	valid := "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+	if err := ValidateSessionID(valid); err != nil {
+		t.Errorf("valid UUID rejected: %v", err)
+	}
+
+	for _, bad := range []string{
+		"",
+		"../../../etc/passwd",
+		"not-a-uuid",
+		"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5", // too short
+		"A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D", // uppercase
+	} {
+		if err := ValidateSessionID(bad); err == nil {
+			t.Errorf("ValidateSessionID(%q) should fail", bad)
+		}
+	}
+}
+
 func TestNilVsEmptyArgs(t *testing.T) {
 	msg1 := &Message{Type: "exec", SessionID: "s", Command: "open", Args: nil, Timestamp: 1}
 	msg2 := &Message{Type: "exec", SessionID: "s", Command: "open", Args: []string{}, Timestamp: 1}

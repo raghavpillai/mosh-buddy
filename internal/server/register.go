@@ -41,6 +41,10 @@ func Register(args []string) error {
 		return fmt.Errorf("usage: mb _register --session=UUID --port=PORT [--key=KEY or key via stdin]")
 	}
 
+	if err := protocol.ValidateSessionID(*session); err != nil {
+		return fmt.Errorf("invalid session ID: %w", err)
+	}
+
 	if _, err := security.KeyFromHex(*key); err != nil {
 		return fmt.Errorf("invalid key: %w", err)
 	}
@@ -108,6 +112,10 @@ func Deregister(args []string) error {
 
 	if *session == "" {
 		return fmt.Errorf("usage: mb _deregister --session=UUID")
+	}
+
+	if err := protocol.ValidateSessionID(*session); err != nil {
+		return fmt.Errorf("invalid session ID: %w", err)
 	}
 
 	homeDir, err := os.UserHomeDir()
