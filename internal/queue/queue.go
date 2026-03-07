@@ -104,6 +104,22 @@ func (q *Queue) Pending(sessionID string) (int, error) {
 	return count, nil
 }
 
+// CleanOrphaned removes queue directories for sessions not in the active set.
+func (q *Queue) CleanOrphaned(activeSessions map[string]bool) {
+	entries, err := os.ReadDir(q.baseDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if !activeSessions[e.Name()] {
+			os.RemoveAll(filepath.Join(q.baseDir, e.Name()))
+		}
+	}
+}
+
 func (q *Queue) EnqueueAt(sessionID string, msg *protocol.Message, nanos int64) error {
 	dir := q.sessionDir(sessionID)
 	if err := os.MkdirAll(dir, 0700); err != nil {

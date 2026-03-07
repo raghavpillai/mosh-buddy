@@ -22,6 +22,7 @@ func Connect(args []string) error {
 		return fmt.Errorf("usage: mb connect [--ssh] user@host")
 	}
 
+
 	useSSH := false
 	var target string
 	for _, a := range args {
@@ -66,7 +67,7 @@ func Connect(args []string) error {
 
 	// Key passed via stdin to avoid ps visibility
 	registerCmd := remoteCmd(fmt.Sprintf("mb _register --session=%s --port=%d --host=%s --user=%s",
-		sessionID, tunnelPort, mbHost, mbUser))
+		sessionID, tunnelPort, shellQuote(mbHost), shellQuote(mbUser)))
 	log.Printf("registering session on %s", target)
 	cmd := exec.Command("ssh", target, registerCmd)
 	cmd.Stdin = strings.NewReader(hexKey + "\n")
@@ -98,17 +99,17 @@ func Connect(args []string) error {
 		cancel()
 	}()
 
-	go tunnelMonitor(ctx, target, tunnelPort, clientPort, sessionID, hexKey)
+	go tunnelMonitor(ctx, target, tunnelPort, clientPort, sessionID, hexKey, mbHost, mbUser)
 
 	var sessionCmd *exec.Cmd
 	if useSSH {
 		envPrefix := fmt.Sprintf("export MB_SESSION=%s MB_PORT=%d MB_HOST=%s MB_USER=%s;",
-			sessionID, tunnelPort, mbHost, mbUser)
+			sessionID, tunnelPort, shellQuote(mbHost), shellQuote(mbUser))
 		sessionCmd = exec.Command("ssh", "-t", "-e", "none", target, envPrefix+" exec $SHELL -l")
 		log.Printf("launching ssh to %s", target)
 	} else {
 		moshServer := fmt.Sprintf("env MB_SESSION=%s MB_PORT=%d MB_HOST=%s MB_USER=%s mosh-server",
-			sessionID, tunnelPort, mbHost, mbUser)
+			sessionID, tunnelPort, shellQuote(mbHost), shellQuote(mbUser))
 		sessionCmd = exec.Command("mosh", "--server="+moshServer, target)
 		log.Printf("launching mosh to %s", target)
 	}
@@ -120,24 +121,23 @@ func Connect(args []string) error {
 	logFile, err := os.OpenFile(filepath.Join(homeDir, ".mb", "connect.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err == nil {
 		log.SetOutput(logFile)
-		defer logFile.Close()
 	}
 
-	sessionErr := sessionCmd.Run()
+	_ = sessionCmd.Run()
+
+	// Restore logging before cleanup so errors are visible
+	log.SetOutput(os.Stderr)
+	if logFile != nil {
+		logFile.Close()
+	}
 
 	cancel()
 	cleanup(target, sessionID, homeDir)
 
-	if sessionErr != nil {
-		if useSSH {
-			return fmt.Errorf("ssh: %w", sessionErr)
-		}
-		return fmt.Errorf("mosh: %w", sessionErr)
-	}
 	return nil
 }
 
-func tunnelMonitor(ctx context.Context, target string, tunnelPort, clientPort int, sessionID, hexKey string) {
+func tunnelMonitor(ctx context.Context, target string, tunnelPort, clientPort int, sessionID, hexKey, mbHost, mbUser string) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -171,8 +171,9 @@ func tunnelMonitor(ctx context.Context, target string, tunnelPort, clientPort in
 		}
 
 		// Re-register in case port changed (for now same port)
-		registerCmd := remoteCmd(fmt.Sprintf("mb _register --session=%s --port=%d", sessionID, tunnelPort))
-		reReg := exec.Command("ssh", target, registerCmd)
+		registerCmd := remoteCmd(fmt.Sprintf("mb _register --session=%s --port=%d --host=%s --user=%s",
+			sessionID, tunnelPort, shellQuote(mbHost), shellQuote(mbUser)))
+		reReg := exec.CommandContext(ctx, "ssh", target, registerCmd)
 		reReg.Stdin = strings.NewReader(hexKey + "\n")
 		_ = reReg.Run() // best-effort
 	}
@@ -193,9 +194,11 @@ func ensureClientDaemon(port int) error {
 	cmd := exec.Command(exe, "client-daemon", fmt.Sprintf("--port=%d", port))
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start client daemon: %w", err)
 	}
+	go cmd.Wait() // reap child process
 
 	for i := 0; i < 20; i++ {
 		time.Sleep(100 * time.Millisecond)
@@ -253,6 +256,11 @@ func resolveTarget(target string) (user, host string) {
 		}
 	}
 	return
+}
+
+// shellQuote wraps a string in single quotes for safe shell interpolation.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 // remoteCmd wraps a command so common user bin directories are in PATH.
