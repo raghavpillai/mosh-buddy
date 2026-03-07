@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/raghavpillai/mosh-buddy/internal/client"
 	"github.com/raghavpillai/mosh-buddy/internal/protocol"
@@ -214,12 +215,31 @@ func handleStatus() error {
 
 	sessDir := filepath.Join(homeDir, ".mb", "sessions")
 	entries, err := os.ReadDir(sessDir)
-	if err == nil && len(entries) > 0 {
-		fmt.Printf("\nActive sessions:\n")
+	if err == nil {
+		var dirs []os.DirEntry
 		for _, e := range entries {
 			if e.IsDir() {
-				fmt.Printf("  - %s\n", e.Name())
+				dirs = append(dirs, e)
 			}
+		}
+		if len(dirs) > 0 {
+			fmt.Printf("\nSessions:\n")
+			for _, e := range dirs {
+				age := ""
+				if info, err := e.Info(); err == nil {
+					d := time.Since(info.ModTime())
+					if d < time.Minute {
+						age = fmt.Sprintf("%ds ago", int(d.Seconds()))
+					} else if d < time.Hour {
+						age = fmt.Sprintf("%dm ago", int(d.Minutes()))
+					} else {
+						age = fmt.Sprintf("%dh ago", int(d.Hours()))
+					}
+				}
+				fmt.Printf("  - %s (%s)\n", e.Name(), age)
+			}
+		} else {
+			fmt.Println("\nNo active sessions")
 		}
 	} else {
 		fmt.Println("\nNo active sessions")
@@ -243,9 +263,25 @@ func loadEnvFallback() {
 	if err != nil {
 		return
 	}
+	// Parse env to find session ID first
+	envVars := make(map[string]string)
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		k, v, ok := strings.Cut(line, "=")
-		if ok && os.Getenv(k) == "" {
+		if ok {
+			envVars[k] = v
+		}
+	}
+	// Verify the session still exists before applying
+	sessionID := envVars["MB_SESSION"]
+	if sessionID == "" {
+		return
+	}
+	keyPath := filepath.Join(homeDir, ".mb", "sessions", sessionID, "key")
+	if _, err := os.Stat(keyPath); err != nil {
+		return // stale env file pointing to dead session
+	}
+	for k, v := range envVars {
+		if os.Getenv(k) == "" {
 			os.Setenv(k, v)
 		}
 	}
